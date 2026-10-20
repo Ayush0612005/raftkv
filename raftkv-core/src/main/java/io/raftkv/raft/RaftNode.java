@@ -59,6 +59,10 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
     private int leaderId = NONE;
     private long commitIndex;
     private long lastApplied;
+    /** Highest log index known to be on stable storage. A leader counts itself toward a commit only up to here. */
+    private long durableIndex;
+    /** Log writes were made since the last sync. */
+    private boolean dirty;
     private long electionDeadlineNanos;
     private boolean started;
     private boolean closed;
@@ -82,9 +86,13 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
         this.storage = storage;
         this.stateMachine = stateMachine;
         this.observer = observer;
-        HardState hs = storage.loadHardState();
-        this.currentTerm = hs.term();
-        this.votedFor = hs.votedFor();
+        RaftStorage.PersistentState state = storage.load();
+        this.currentTerm = state.hardState().term();
+        this.votedFor = state.hardState().votedFor();
+        for (LogEntry entry : state.entries()) {
+            log.append(entry);
+        }
+        this.durableIndex = log.lastIndex();
     }
 
     public RaftNode(RaftConfig config, RaftTransport transport, RaftStorage storage, StateMachine stateMachine) {
@@ -148,8 +156,12 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
                 .setData(data)
                 .build();
         log.append(entry);
+        storage.append(List.of(entry)); // buffered: synced by the replicators (group commit)
+        dirty = true;
         replicatorWakeup.signalAll();
-        advanceCommitIndex(); // a single-node cluster commits right away
+        if (config.peers().isEmpty()) {
+            syncLeaderLog(); // a single-node cluster commits right away
+        }
         return entry;
     }
 
@@ -285,7 +297,29 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
     }
 
     private void persistHardState() {
-        storage.saveHardState(new HardState(currentTerm, votedFor));
+        storage.saveHardState(new HardState(currentTerm, votedFor)); // also syncs earlier log writes
+        markSynced();
+    }
+
+    private void syncStorage() {
+        storage.sync();
+        markSynced();
+    }
+
+    private void markSynced() {
+        dirty = false;
+        durableIndex = log.lastIndex();
+    }
+
+    /**
+     * Makes the leader's own new entries durable, then re-evaluates the commit index. Called by every replicator
+     * before it sends, so one fsync covers all entries proposed since the last one. Lock held.
+     */
+    private void syncLeaderLog() {
+        if (dirty) {
+            syncStorage();
+            advanceCommitIndex();
+        }
     }
 
     // ------------------------------------------------------------------------------------------- replication
@@ -304,6 +338,7 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
         lock.lock();
         try {
             while (isLeaderOf(term)) {
+                syncLeaderLog();
                 long next = nextIndex.get(peer);
                 long prevIndex = next - 1;
                 AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
@@ -382,7 +417,7 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
             if (log.termAt(n) != currentTerm) {
                 break; // earlier entries have older terms; they commit indirectly (§5.4.2)
             }
-            int replicas = 1;
+            int replicas = durableIndex >= n ? 1 : 0;
             for (long match : matchIndex.values()) {
                 if (match >= n) {
                     replicas++;
@@ -463,10 +498,17 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
                                 + " tried to overwrite committed index " + index);
                     }
                     log.truncateFrom(index);
+                    storage.truncateFrom(index);
+                    dirty = true;
                 }
                 log.append(entry);
+                storage.append(List.of(entry));
+                dirty = true;
             }
 
+            if (dirty) {
+                syncStorage(); // the leader may count this ack toward a commit: the entries must survive a crash
+            }
             long lastNew = prevIndex + request.getEntriesCount();
             if (request.getLeaderCommit() > commitIndex) {
                 commitIndex = Math.max(commitIndex, Math.min(request.getLeaderCommit(), lastNew));

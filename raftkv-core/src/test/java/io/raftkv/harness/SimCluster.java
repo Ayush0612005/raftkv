@@ -7,7 +7,11 @@ import io.raftkv.raft.Proposal;
 import io.raftkv.raft.RaftConfig;
 import io.raftkv.raft.RaftNode;
 import io.raftkv.raft.RaftObserver;
+import io.raftkv.raft.RaftStorage;
 import io.raftkv.raft.StateMachine;
+import io.raftkv.storage.FileStorage;
+
+import java.nio.file.Path;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,7 +40,9 @@ public final class SimCluster implements AutoCloseable {
     private final int n;
     private final SimNetwork network = new SimNetwork();
     private final RaftNode[] nodes;
-    private final MemoryStorage[] storages;
+    private final RaftStorage[] storages;
+    /** null: in-memory storage; otherwise each node keeps a real WAL in dataDir/node-i. */
+    private final Path dataDir;
     /** What each node applied: index -> command. */
     private final List<Map<Long, String>> applied = new ArrayList<>();
     private final long[] lastAppliedIndex;
@@ -44,18 +50,28 @@ public final class SimCluster implements AutoCloseable {
     private final List<String> violations = new ArrayList<>();
 
     public SimCluster(int n) {
+        this(n, null);
+    }
+
+    /** A cluster whose nodes store their logs in real {@link FileStorage} WALs under {@code dataDir}. */
+    public SimCluster(int n, Path dataDir) {
         this.n = n;
+        this.dataDir = dataDir;
         this.nodes = new RaftNode[n];
-        this.storages = new MemoryStorage[n];
+        this.storages = new RaftStorage[n];
         this.lastAppliedIndex = new long[n];
         for (int i = 0; i < n; i++) {
-            storages[i] = new MemoryStorage();
             applied.add(new ConcurrentHashMap<>());
             startNode(i);
         }
     }
 
     private void startNode(int i) {
+        if (dataDir != null) {
+            storages[i] = new FileStorage(dataDir.resolve("node-" + i), true);
+        } else if (storages[i] == null) {
+            storages[i] = new MemoryStorage();
+        }
         List<Integer> peers = IntStream.range(0, n).filter(p -> p != i).boxed().toList();
         RaftObserver observer = new RaftObserver() {
             @Override
@@ -110,6 +126,33 @@ public final class SimCluster implements AutoCloseable {
         return nodes[i];
     }
 
+    /**
+     * Crashes node i: it stops receiving RPCs, its threads stop, and its storage is closed. Writes it had not synced
+     * are lost, as with a power failure.
+     */
+    public void crash(int i) {
+        network.unregister(i);
+        RaftNode node = nodes[i];
+        nodes[i] = null;
+        if (node != null) {
+            node.close();
+        }
+    }
+
+    /** Restarts a crashed node from what its storage recovered. It re-applies its log from the start. */
+    public void restart(int i) {
+        crash(i);
+        synchronized (this) {
+            applied.get(i).clear();
+            lastAppliedIndex[i] = 0;
+        }
+        startNode(i);
+    }
+
+    public boolean isAlive(int i) {
+        return nodes[i] != null;
+    }
+
     public void disconnect(int i) {
         network.disconnect(i);
     }
@@ -122,8 +165,12 @@ public final class SimCluster implements AutoCloseable {
 
     /** Proposes on node i; returns the proposal or null if it is not leader. */
     public Proposal start(int i, String command) {
+        RaftNode node = nodes[i];
+        if (node == null) {
+            return null;
+        }
         try {
-            return nodes[i].propose(command.getBytes());
+            return node.propose(command.getBytes());
         } catch (NotLeaderException e) {
             return null;
         }
@@ -163,7 +210,7 @@ public final class SimCluster implements AutoCloseable {
             long index = -1;
             for (int si = 0; si < n; si++) {
                 starts = (starts + 1) % n;
-                if (network.isConnected(starts)) {
+                if (network.isConnected(starts) && isAlive(starts)) {
                     Proposal p = start(starts, command);
                     if (p != null) {
                         index = p.index();
@@ -252,8 +299,9 @@ public final class SimCluster implements AutoCloseable {
             sleep(450 + ThreadLocalRandom.current().nextInt(100));
             Map<Long, List<Integer>> leaders = new HashMap<>();
             for (int i = 0; i < n; i++) {
-                if (network.isConnected(i)) {
-                    NodeStatus status = nodes[i].status();
+                RaftNode node = nodes[i];
+                if (node != null && network.isConnected(i)) {
+                    NodeStatus status = node.status();
                     if (status.isLeader()) {
                         leaders.computeIfAbsent(status.term(), t -> new ArrayList<>()).add(i);
                     }
@@ -279,8 +327,9 @@ public final class SimCluster implements AutoCloseable {
     public long checkTerms() {
         long term = -1;
         for (int i = 0; i < n; i++) {
-            if (network.isConnected(i)) {
-                long t = nodes[i].status().term();
+            RaftNode node = nodes[i];
+            if (node != null && network.isConnected(i)) {
+                long t = node.status().term();
                 if (term == -1) {
                     term = t;
                 } else if (term != t) {
@@ -294,7 +343,8 @@ public final class SimCluster implements AutoCloseable {
     /** No connected node believes it is leader. */
     public void checkNoLeader() {
         for (int i = 0; i < n; i++) {
-            if (network.isConnected(i) && nodes[i].status().isLeader()) {
+            RaftNode node = nodes[i];
+            if (node != null && network.isConnected(i) && node.status().isLeader()) {
                 fail("expected no leader among connected servers, but " + i + " claims to be leader");
             }
         }

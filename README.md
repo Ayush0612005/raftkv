@@ -5,7 +5,7 @@ A replicated, fault-tolerant key-value store built from scratch on the
 the same ground as the internals of etcd, Kafka's KRaft and replicated databases: leader election, log
 replication, a write-ahead log, crash recovery, exactly-once client semantics and log compaction.
 
-Status: **Phase 2 complete** (log replication). See [Build phases](#build-phases).
+Status: **Phase 3 complete** (WAL + crash recovery). See [Build phases](#build-phases).
 
 ## Tech stack
 
