@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * In-process network for fault-injection tests. Every RPC is a direct method call on the target's handler, with
@@ -127,6 +128,35 @@ public final class SimNetwork {
         }
         if (longReordering && random.nextInt(900) < 600) {
             sleep(200 + random.nextInt(1 + random.nextInt(2000)));
+        }
+        return response;
+    }
+
+    /**
+     * A client request to server {@code to}. Clients sit outside the partitions (they can reach a minority-side
+     * server, which then cannot commit), but they cannot reach a crashed or disconnected server, and in unreliable
+     * mode their requests and replies are delayed and dropped like everything else. {@code invocation} returning
+     * null means the server is gone.
+     */
+    public <T> T callFromClient(int to, Supplier<T> invocation) throws RpcException {
+        rpcCount.incrementAndGet();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        if (!reliable) {
+            sleep(random.nextInt(27));
+            if (random.nextInt(1000) < 100) {
+                throw new RpcException("client request dropped");
+            }
+        }
+        if (!handlers.containsKey(to) || disconnected.contains(to)) {
+            sleep(random.nextInt(100));
+            throw new RpcException("server " + to + " unreachable");
+        }
+        T response = invocation.get();
+        if (response == null || disconnected.contains(to)) {
+            throw new RpcException("reply lost");
+        }
+        if (!reliable && random.nextInt(1000) < 100) {
+            throw new RpcException("client reply dropped");
         }
         return response;
     }

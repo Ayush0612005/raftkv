@@ -10,10 +10,12 @@ Owner: Ayush (GitHub `Ayush0612005`), repo `Ayush0612005/raftkv` (public).
 - Phase 1 (election): done, gate passed. Report `docs/phase-1.md`. Fault-injection harness in `raftkv-core/src/test/java/io/raftkv/harness`.
 - Phase 2 (replication): done, gate passed. Report `docs/phase-2.md`.
 - Phase 3 (persistence): done, gate passed. Report `docs/phase-3.md`. WAL = `storage/FileStorage`.
-- **Next: Phase 4 (KV state machine). Do not start it until the owner says so.** Planned: `kv.proto`
-  (Command {op, key, value, client_id, seq}, KvResponse), `KvStateMachine` with per-client dedup table
-  (exactly-once), gRPC `Kv` service + `GrpcTransport` / Raft service for real nodes, Java client library with
-  leader redirect + retry, picocli CLI, WGL-style linearizability checker in the test harness (per-key partitioning).
+- Phase 4 (KV + client API): done, gate passed. Report `docs/phase-4.md`. Packages `kv`, `transport`, `server`,
+  `client`, `cli`; shaded jar `raftkv-core/target/raftkv.jar`. Linearizability checker `harness/Linearizability`.
+- **Next: Phase 5 (snapshots). Do not start it until the owner says so.** Planned: `StateMachine.snapshot()/restore()`
+  (KV map + dedup sessions), `RaftLog.compact`, snapshot file (atomic write) + WAL rewrite in `FileStorage`,
+  InstallSnapshot RPC (leader sends when `nextIndex <= snapshotIndex`), applier restores snapshots, threshold-based
+  compaction; gate test: log size stays bounded under a long write workload and lagging/restarted nodes recover.
 
 ## Plan (one commit + `docs/phase-N.md` report per phase, pushed to `main`)
 

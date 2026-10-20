@@ -11,7 +11,9 @@ import io.raftkv.raft.RaftStorage;
 import io.raftkv.raft.StateMachine;
 import io.raftkv.storage.FileStorage;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,15 +50,27 @@ public final class SimCluster implements AutoCloseable {
     private final long[] lastAppliedIndex;
     private final Map<Long, Integer> leaderOfTerm = new ConcurrentHashMap<>();
     private final List<String> violations = new ArrayList<>();
+    /** Creates each node's application state machine (again on every restart, since the log is re-applied). */
+    private final Supplier<StateMachine> stateMachineFactory;
+    private final StateMachine[] stateMachines;
 
     public SimCluster(int n) {
         this(n, null);
     }
 
-    /** A cluster whose nodes store their logs in real {@link FileStorage} WALs under {@code dataDir}. */
     public SimCluster(int n, Path dataDir) {
+        this(n, dataDir, () -> (index, command) -> command);
+    }
+
+    /**
+     * @param dataDir null for in-memory storage, otherwise each node keeps a real {@link FileStorage} WAL there
+     * @param stateMachineFactory the application under test (the default echoes the command back)
+     */
+    public SimCluster(int n, Path dataDir, Supplier<StateMachine> stateMachineFactory) {
         this.n = n;
         this.dataDir = dataDir;
+        this.stateMachineFactory = stateMachineFactory;
+        this.stateMachines = new StateMachine[n];
         this.nodes = new RaftNode[n];
         this.storages = new RaftStorage[n];
         this.lastAppliedIndex = new long[n];
@@ -82,9 +96,11 @@ public final class SimCluster implements AutoCloseable {
                 }
             }
         };
+        StateMachine application = stateMachineFactory.get();
+        stateMachines[i] = application;
         StateMachine stateMachine = (index, command) -> {
-            onApply(i, index, new String(command));
-            return command;
+            onApply(i, index, new String(command, StandardCharsets.ISO_8859_1));
+            return application.apply(index, command);
         };
         RaftNode node = new RaftNode(RaftConfig.defaults(i, peers), network.transportFor(i), storages[i],
                 stateMachine, observer);
@@ -124,6 +140,11 @@ public final class SimCluster implements AutoCloseable {
 
     public RaftNode node(int i) {
         return nodes[i];
+    }
+
+    /** The application state machine of node i (a fresh one after each restart). */
+    public StateMachine stateMachine(int i) {
+        return stateMachines[i];
     }
 
     /**

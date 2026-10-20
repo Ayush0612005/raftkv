@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package raftkv.kv;
+
+option java_package = "io.raftkv.proto";
+option java_multiple_files = true;
+
+// Client API. Every operation, reads included, goes through the Raft log, so all of them are linearizable.
+service Kv {
+  rpc Execute(KvCommand) returns (KvResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
+
+enum Op {
+  GET = 0;
+  PUT = 1;
+  DELETE = 2;
+}
+
+// The command stored in the log. (client_id, seq) identifies it for exactly-once execution: a client has at most
+// one command outstanding and retries it with the same seq until it gets an answer.
+message KvCommand {
+  Op op = 1;
+  string key = 2;
+  string value = 3;
+  int64 client_id = 4;
+  int64 seq = 5;
+}
+
+// What the state machine returns for a command.
+message KvResult {
+  bool found = 1;   // GET: key present. DELETE: key was present. PUT: key was present before.
+  string value = 2; // GET: the value.
+}
+
+message KvResponse {
+  enum Status {
+    OK = 0;
+    NOT_LEADER = 1;  // retry at leader_hint if >= 0
+    TIMEOUT = 2;     // outcome unknown; retry (same seq) is safe
+  }
+  Status status = 1;
+  KvResult result = 2;
+  int32 leader_hint = 3;
+}
+
+message StatusRequest {
+}
+
+message StatusResponse {
+  int32 id = 1;
+  string role = 2;
+  int64 term = 3;
+  int32 leader_id = 4;
+  int64 last_log_index = 5;
+  int64 commit_index = 6;
+  int64 last_applied = 7;
+}

@@ -5,7 +5,7 @@ A replicated, fault-tolerant key-value store built from scratch on the
 the same ground as the internals of etcd, Kafka's KRaft and replicated databases: leader election, log
 replication, a write-ahead log, crash recovery, exactly-once client semantics and log compaction.
 
-Status: **Phase 3 complete** (WAL + crash recovery). See [Build phases](#build-phases).
+Status: **Phase 4 complete** (KV store, exactly-once, linearizable). See [Quick start](#quick-start) and [Build phases](#build-phases).
 
 ## Tech stack
 
@@ -37,7 +37,31 @@ Each phase has a report in [`docs/`](docs).
 Requires JDK 25. The Maven wrapper downloads Maven itself.
 
 ```bash
-./mvnw -B verify
+./mvnw -B verify          # build + all tests (unit, fault-injection, linearizability, gRPC)
+```
+
+## Quick start
+
+```bash
+./mvnw -B package -DskipTests
+CLUSTER=1=localhost:7001,2=localhost:7002,3=localhost:7003
+java -jar raftkv-core/target/raftkv.jar server --id 1 --cluster $CLUSTER --data-dir data/n1 &
+java -jar raftkv-core/target/raftkv.jar server --id 2 --cluster $CLUSTER --data-dir data/n2 &
+java -jar raftkv-core/target/raftkv.jar server --id 3 --cluster $CLUSTER --data-dir data/n3 &
+
+export RAFTKV_CLUSTER=$CLUSTER
+java -jar raftkv-core/target/raftkv.jar put city Munich
+java -jar raftkv-core/target/raftkv.jar get city
+java -jar raftkv-core/target/raftkv.jar status
+```
+
+Java client:
+
+```java
+try (RaftKvClient kv = RaftKvClient.connect(Map.of(1, "localhost:7001", 2, "localhost:7002", 3, "localhost:7003"))) {
+    kv.put("city", "Munich");
+    Optional<String> city = kv.get("city");
+}
 ```
 
 ## References
