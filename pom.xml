@@ -81,6 +81,9 @@
           <configuration>
             <!-- keep test temp files inside target/ (and so on the project drive) -->
             <argLine>-Djava.io.tmpdir=${project.build.directory}</argLine>
+            <systemPropertyVariables>
+              <java.util.logging.config.file>${project.basedir}/src/test/resources/logging.properties</java.util.logging.config.file>
+            </systemPropertyVariables>
             <trimStackTrace>false</trimStackTrace>
           </configuration>
         </plugin>

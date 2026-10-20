@@ -7,6 +7,7 @@ Owner: Ayush (GitHub `Ayush0612005`), repo `Ayush0612005/raftkv` (public).
 ## Current state
 
 - Phase 0 (skeleton): build, CI, license.
+- Phase 1 (election): done, gate passed. Report `docs/phase-1.md`. Fault-injection harness in `raftkv-core/src/test/java/io/raftkv/harness`.
 
 ## Plan (one commit + `docs/phase-N.md` report per phase, pushed to `main`)
 
