@@ -1,0 +1,70 @@
+package io.raftkv.raft;
+
+import io.raftkv.proto.LogEntry;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+class RaftLogTest {
+
+    private static LogEntry entry(long index, long term) {
+        return LogEntry.newBuilder().setIndex(index).setTerm(term).build();
+    }
+
+    private static RaftLog logWithTerms(long... terms) {
+        RaftLog log = new RaftLog();
+        for (int i = 0; i < terms.length; i++) {
+            log.append(entry(i + 1, terms[i]));
+        }
+        return log;
+    }
+
+    @Test
+    void emptyLogHasSentinelAtZero() {
+        RaftLog log = new RaftLog();
+        assertEquals(0, log.lastIndex());
+        assertEquals(0, log.lastTerm());
+        assertEquals(0, log.termAt(0));
+        assertEquals(-1, log.termAt(1));
+    }
+
+    @Test
+    void appendRequiresConsecutiveIndexAndMonotonicTerm() {
+        RaftLog log = logWithTerms(1, 1, 2);
+        assertThrows(IllegalArgumentException.class, () -> log.append(entry(5, 2)));
+        assertThrows(IllegalArgumentException.class, () -> log.append(entry(4, 1)));
+        log.append(entry(4, 3));
+        assertEquals(4, log.lastIndex());
+        assertEquals(3, log.lastTerm());
+    }
+
+    @Test
+    void truncateRemovesSuffix() {
+        RaftLog log = logWithTerms(1, 1, 2, 2, 3);
+        log.truncateFrom(3);
+        assertEquals(2, log.lastIndex());
+        assertEquals(1, log.lastTerm());
+        log.truncateFrom(10); // beyond the end: no-op
+        assertEquals(2, log.lastIndex());
+    }
+
+    @Test
+    void sliceRespectsCountAndBytes() {
+        RaftLog log = logWithTerms(1, 1, 1, 1, 1);
+        assertEquals(3, log.slice(2, 5, 3, Long.MAX_VALUE).size());
+        assertEquals(4, log.slice(2, 99, 100, Long.MAX_VALUE).size());
+        assertEquals(1, log.slice(1, 5, 100, 1).size(), "always at least one entry");
+        assertEquals(0, log.slice(6, 5, 100, Long.MAX_VALUE).size());
+    }
+
+    @Test
+    void termRunLookups() {
+        RaftLog log = logWithTerms(1, 1, 4, 4, 4, 5);
+        assertEquals(3, log.firstIndexOfTermRun(5));
+        assertEquals(1, log.firstIndexOfTermRun(2));
+        assertEquals(5, log.lastIndexOfTerm(4));
+        assertEquals(-1, log.lastIndexOfTerm(3));
+        assertEquals(6, log.lastIndexOfTerm(5));
+    }
+}
