@@ -1,0 +1,14 @@
+target/
+*.class
+*.log
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Maven local repository kept on the project drive (see .mvn/maven.config)
+.m2/
+
+# local node data from manual runs / benchmarks
+data/
+bench/work/
