@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 400" width="720" height="400" role="img" aria-label="Write throughput vs. concurrent clients" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+<style>
+  .bg { fill: #fcfcfb; } .t1 { fill: #0b0b0b; } .t2 { fill: #52514e; } .t3 { fill: #6f6e69; }
+  .grid { stroke: #e7e6e2; } .axis { stroke: #b9b8b2; }
+  .s1 { stroke: #2a78d6; fill: #2a78d6; } .s2 { stroke: #eb6834; fill: #eb6834; }
+  .s3 { stroke: #1baf7a; fill: #1baf7a; } .ring { stroke: #fcfcfb; }
+  @media (prefers-color-scheme: dark) {
+    .bg { fill: #1a1a19; } .t1 { fill: #f0efec; } .t2 { fill: #c3c2b7; } .t3 { fill: #a3a29a; }
+    .grid { stroke: #2f2f2d; } .axis { stroke: #57564f; }
+    .s1 { stroke: #3987e5; fill: #3987e5; } .s2 { stroke: #d95926; fill: #d95926; }
+    .s3 { stroke: #199e70; fill: #199e70; } .ring { stroke: #1a1a19; }
+  }
+</style>
+<rect class="bg" width="720" height="400" rx="8"/>
+<text class="t1" x="72" y="30" font-size="17" font-weight="600">Write throughput vs. concurrent clients</text>
+<text class="t2" x="72" y="50" font-size="12.5">Committed PUTs per second, fsync on, all nodes on one machine</text>
+<line class="s1" x1="72" y1="68" x2="90" y2="68" stroke-width="2"/><circle class="s1" cx="81" cy="68" r="4"/>
+<text class="t2" x="96" y="72" font-size="12">3 nodes</text>
+<line class="s2" x1="168" y1="68" x2="186" y2="68" stroke-width="2"/><circle class="s2" cx="177" cy="68" r="4"/>
+<text class="t2" x="192" y="72" font-size="12">5 nodes</text>
+<line class="grid" x1="72" y1="344.0" x2="624" y2="344.0" stroke-width="1"/>
+<text class="t3" x="64" y="348.0" font-size="11" text-anchor="end">0</text>
+<line class="grid" x1="72" y1="284.0" x2="624" y2="284.0" stroke-width="1"/>
+<text class="t3" x="64" y="288.0" font-size="11" text-anchor="end">5K</text>
+<line class="grid" x1="72" y1="224.0" x2="624" y2="224.0" stroke-width="1"/>
+<text class="t3" x="64" y="228.0" font-size="11" text-anchor="end">10K</text>
+<line class="grid" x1="72" y1="164.0" x2="624" y2="164.0" stroke-width="1"/>
+<text class="t3" x="64" y="168.0" font-size="11" text-anchor="end">15K</text>
+<line class="grid" x1="72" y1="104.0" x2="624" y2="104.0" stroke-width="1"/>
+<text class="t3" x="64" y="108.0" font-size="11" text-anchor="end">20K</text>
+<text class="t3" x="64" y="88" font-size="11" text-anchor="end">ops/s</text>
+<line class="axis" x1="72" y1="344" x2="624" y2="344" stroke-width="1"/>
+<text class="t3" x="90.0" y="362" font-size="11" text-anchor="middle">1</text>
+<text class="t3" x="163.7" y="362" font-size="11" text-anchor="middle">2</text>
+<text class="t3" x="237.4" y="362" font-size="11" text-anchor="middle">4</text>
+<text class="t3" x="311.1" y="362" font-size="11" text-anchor="middle">8</text>
+<text class="t3" x="384.9" y="362" font-size="11" text-anchor="middle">16</text>
+<text class="t3" x="458.6" y="362" font-size="11" text-anchor="middle">32</text>
+<text class="t3" x="532.3" y="362" font-size="11" text-anchor="middle">64</text>
+<text class="t3" x="606.0" y="362" font-size="11" text-anchor="middle">128</text>
+<text class="t2" x="348" y="386" font-size="12" text-anchor="middle">concurrent clients</text>
+<path class="s1" d="M90.0 339.2 L163.7 335.2 L237.4 326.7 L311.1 310.1 L384.9 283.8 L458.6 257.2 L532.3 202.6 L606.0 148.8" fill="none" stroke-width="2" stroke-linejoin="round" style="fill: none"/>
+<circle class="s1" cx="90.0" cy="339.2" r="4"/><circle class="ring" cx="90.0" cy="339.2" r="5" fill="none" stroke-width="2"/><title>3 nodes, 1 clients: 403 ops/s</title>
+<circle class="s1" cx="163.7" cy="335.2" r="4"/><circle class="ring" cx="163.7" cy="335.2" r="5" fill="none" stroke-width="2"/><title>3 nodes, 2 clients: 735 ops/s</title>
+<circle class="s1" cx="237.4" cy="326.7" r="4"/><circle class="ring" cx="237.4" cy="326.7" r="5" fill="none" stroke-width="2"/><title>3 nodes, 4 clients: 1.4K ops/s</title>
+<circle class="s1" cx="311.1" cy="310.1" r="4"/><circle class="ring" cx="311.1" cy="310.1" r="5" fill="none" stroke-width="2"/><title>3 nodes, 8 clients: 2.8K ops/s</title>
+<circle class="s1" cx="384.9" cy="283.8" r="4"/><circle class="ring" cx="384.9" cy="283.8" r="5" fill="none" stroke-width="2"/><title>3 nodes, 16 clients: 5.0K ops/s</title>
+<circle class="s1" cx="458.6" cy="257.2" r="4"/><circle class="ring" cx="458.6" cy="257.2" r="5" fill="none" stroke-width="2"/><title>3 nodes, 32 clients: 7.2K ops/s</title>
+<circle class="s1" cx="532.3" cy="202.6" r="4"/><circle class="ring" cx="532.3" cy="202.6" r="5" fill="none" stroke-width="2"/><title>3 nodes, 64 clients: 11.8K ops/s</title>
+<circle class="s1" cx="606.0" cy="148.8" r="4"/><circle class="ring" cx="606.0" cy="148.8" r="5" fill="none" stroke-width="2"/><title>3 nodes, 128 clients: 16.3K ops/s</title>
+<path class="s2" d="M90.0 339.5 L163.7 336.8 L237.4 329.5 L311.1 316.2 L384.9 299.9 L458.6 273.7 L532.3 242.4 L606.0 197.8" fill="none" stroke-width="2" stroke-linejoin="round" style="fill: none"/>
+<circle class="s2" cx="90.0" cy="339.5" r="4"/><circle class="ring" cx="90.0" cy="339.5" r="5" fill="none" stroke-width="2"/><title>5 nodes, 1 clients: 375 ops/s</title>
+<circle class="s2" cx="163.7" cy="336.8" r="4"/><circle class="ring" cx="163.7" cy="336.8" r="5" fill="none" stroke-width="2"/><title>5 nodes, 2 clients: 600 ops/s</title>
+<circle class="s2" cx="237.4" cy="329.5" r="4"/><circle class="ring" cx="237.4" cy="329.5" r="5" fill="none" stroke-width="2"/><title>5 nodes, 4 clients: 1.2K ops/s</title>
+<circle class="s2" cx="311.1" cy="316.2" r="4"/><circle class="ring" cx="311.1" cy="316.2" r="5" fill="none" stroke-width="2"/><title>5 nodes, 8 clients: 2.3K ops/s</title>
+<circle class="s2" cx="384.9" cy="299.9" r="4"/><circle class="ring" cx="384.9" cy="299.9" r="5" fill="none" stroke-width="2"/><title>5 nodes, 16 clients: 3.7K ops/s</title>
+<circle class="s2" cx="458.6" cy="273.7" r="4"/><circle class="ring" cx="458.6" cy="273.7" r="5" fill="none" stroke-width="2"/><title>5 nodes, 32 clients: 5.9K ops/s</title>
+<circle class="s2" cx="532.3" cy="242.4" r="4"/><circle class="ring" cx="532.3" cy="242.4" r="5" fill="none" stroke-width="2"/><title>5 nodes, 64 clients: 8.5K ops/s</title>
+<circle class="s2" cx="606.0" cy="197.8" r="4"/><circle class="ring" cx="606.0" cy="197.8" r="5" fill="none" stroke-width="2"/><title>5 nodes, 128 clients: 12.2K ops/s</title>
+<text class="t1" x="616.0" y="152.8" font-size="12">3 nodes</text>
+<text class="t1" x="616.0" y="201.8" font-size="12">5 nodes</text>
+</svg>

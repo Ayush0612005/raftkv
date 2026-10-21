@@ -1,0 +1,14 @@
+# JMH results (one local run; see environment.txt)
+# java -jar raftkv-bench/target/raftkv-bench.jar WalBenchmark -f 1 -wi 1 -i 2 -w 2s -r 3s
+Benchmark                  (fsync)   Mode  Cnt        Score   Error  Units
+WalBenchmark.appendSync1      true  thrpt    2     2701.220          ops/s
+WalBenchmark.appendSync1     false  thrpt    2   388453.219          ops/s
+WalBenchmark.appendSync32     true  thrpt    2    85817.697          ops/s
+WalBenchmark.appendSync32    false  thrpt    2  3750718.944          ops/s
+
+# java -jar raftkv-bench/target/raftkv-bench.jar KvStateMachineBenchmark -f 1 -wi 2 -i 3 -w 2s -r 3s
+Benchmark                                  (keys)   Mode  Cnt        Score        Error  Units
+KvStateMachineBenchmark.applyGet           100000  thrpt    3  2031729.228 ±  81227.195  ops/s
+KvStateMachineBenchmark.applyPut           100000  thrpt    3  1923415.122 ± 797242.368  ops/s
+KvStateMachineBenchmark.snapshotRestore    100000   avgt    3       32.518 ±     29.760  ms/op
+KvStateMachineBenchmark.snapshotSerialize  100000   avgt    3       63.234 ±     13.056  ms/op

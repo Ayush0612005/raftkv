@@ -1,0 +1,9 @@
+date: 2026-10-21T11:43:35.1346433
+os: Windows 11 10.0 amd64
+cpu: AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD, 8 logical CPUs
+java: Java HotSpot(TM) 64-Bit Server VM 25.0.1
+setup: all server processes and the load generator on this one machine, localhost gRPC
+fsync: true
+workload: 100% PUT, 100-byte values, 10000 keys, closed loop
+warm-up: 15 s per cluster, then per point 3 s warm-up + 10 s measured
+hardware: AMD Ryzen 5 7235HS, 12 GB RAM, Micron MTFDKCD512QGN NVMe SSD (D: drive)

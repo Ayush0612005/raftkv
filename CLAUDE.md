@@ -19,7 +19,7 @@ Owner: Ayush (GitHub `Ayush0612005`), repo `Ayush0612005/raftkv` (public).
   (real processes, writes `docs/bench/*`); re-render charts with `io.raftkv.bench.Charts docs/bench`.
 - **All six planned phases are complete.** Possible extensions (only on the owner's request): Pre-Vote, leader
   fsync overlapped with replication (§10.2.1), AppendEntries pipelining, ReadIndex reads, membership changes.
-- Docker Desktop data lives on D (`D:DockerData`). Benchmarks must run alone on the laptop (CPU-bound).
+- Docker Desktop data lives on D (`D:\DockerData`). Benchmarks must run alone on the laptop (CPU-bound).
 
 ## Plan (one commit + `docs/phase-N.md` report per phase, pushed to `main`)
 
