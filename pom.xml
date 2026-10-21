@@ -13,6 +13,7 @@
 
   <modules>
     <module>raftkv-core</module>
+    <module>raftkv-bench</module>
   </modules>
 
   <properties>

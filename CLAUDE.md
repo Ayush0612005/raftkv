@@ -14,11 +14,12 @@ Owner: Ayush (GitHub `Ayush0612005`), repo `Ayush0612005/raftkv` (public).
   `client`, `cli`; shaded jar `raftkv-core/target/raftkv.jar`. Linearizability checker `harness/Linearizability`.
 - Phase 5 (snapshots): done, gate passed. Report `docs/phase-5.md`. `RaftConfig.snapshotThreshold` /
   `--snapshot-threshold` (default 10,000), `snapshot.bin` + WAL rewrite in `FileStorage`, InstallSnapshot RPC.
-- **Next: Phase 6 (fault tests in CI + benchmarks). Do not start it until the owner says so.** Planned: separate CI
-  job for the long fault-injection suite; JMH micro-benchmarks (WAL append+fsync, KV apply, snapshot serialize) in a
-  `raftkv-bench` module; load generator (closed-loop clients, throughput + p50/p99 latency) against real 3-node and
-  5-node gRPC clusters; Dockerfile + docker-compose for 3/5 nodes (Docker Desktop must be running; it was not on
-  2026-10-20); results table + SVG graphs (generated in Java, no Python on this laptop) in the README.
+- Phase 6 (fault tests + bench): done, gate passed. Report `docs/phase-6.md`. CI = unit, fault-injection x2
+  (`@Tag("fault")`), Docker chaos (`scripts/chaos.sh`). Module `raftkv-bench`: JMH + `ClusterBenchmark`
+  (real processes, writes `docs/bench/*`); re-render charts with `io.raftkv.bench.Charts docs/bench`.
+- **All six planned phases are complete.** Possible extensions (only on the owner's request): Pre-Vote, leader
+  fsync overlapped with replication (§10.2.1), AppendEntries pipelining, ReadIndex reads, membership changes.
+- Docker Desktop data lives on D (`D:DockerData`). Benchmarks must run alone on the laptop (CPU-bound).
 
 ## Plan (one commit + `docs/phase-N.md` report per phase, pushed to `main`)
 
