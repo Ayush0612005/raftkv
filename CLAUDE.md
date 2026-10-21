@@ -47,4 +47,4 @@ Owner: Ayush (GitHub `Ayush0612005`), repo `Ayush0612005/raftkv` (public).
 ## Working style
 
 - Before modifying code: state the files, changes and acceptance criteria; keep changes small and staged.
-- Commit messages end with a `Co-Authored-By` trailer; push to `main`.
+- Commit messages carry no Claude co-author or session trailers (owner's decision, 2026-10-21); push to `main`.
