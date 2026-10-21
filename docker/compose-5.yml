@@ -1,0 +1,46 @@
+# 5-node RaftKV cluster. Build the image first:
+#   ./mvnw -B package -DskipTests && docker build -t raftkv:latest .
+#   docker compose -f docker/compose-5.yml up -d
+# Clients on the host: RAFTKV_CLUSTER=1=localhost:7001,2=localhost:7002,3=localhost:7003,4=localhost:7004,5=localhost:7005
+name: raftkv5
+
+x-node: &node
+  image: raftkv:latest
+  restart: "no"
+  stop_grace_period: 2s
+
+x-cluster: &cluster "1=node1:7000,2=node2:7000,3=node3:7000,4=node4:7000,5=node5:7000"
+
+services:
+  node1:
+    <<: *node
+    command: ["server", "--id", "1", "--cluster", *cluster, "--data-dir", "/data"]
+    ports: ["7001:7000"]
+    volumes: ["node1:/data"]
+  node2:
+    <<: *node
+    command: ["server", "--id", "2", "--cluster", *cluster, "--data-dir", "/data"]
+    ports: ["7002:7000"]
+    volumes: ["node2:/data"]
+  node3:
+    <<: *node
+    command: ["server", "--id", "3", "--cluster", *cluster, "--data-dir", "/data"]
+    ports: ["7003:7000"]
+    volumes: ["node3:/data"]
+  node4:
+    <<: *node
+    command: ["server", "--id", "4", "--cluster", *cluster, "--data-dir", "/data"]
+    ports: ["7004:7000"]
+    volumes: ["node4:/data"]
+  node5:
+    <<: *node
+    command: ["server", "--id", "5", "--cluster", *cluster, "--data-dir", "/data"]
+    ports: ["7005:7000"]
+    volumes: ["node5:/data"]
+
+volumes:
+  node1: {}
+  node2: {}
+  node3: {}
+  node4: {}
+  node5: {}

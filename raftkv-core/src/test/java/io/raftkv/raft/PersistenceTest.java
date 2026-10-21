@@ -1,6 +1,7 @@
 package io.raftkv.raft;
 
 import io.raftkv.harness.SimCluster;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -16,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Phase 3 gate: a restarted node catches up. Modelled on MIT 6.5840 lab 3C, plus tests on the real WAL. */
+@Tag("fault")
 class PersistenceTest {
 
     @TempDir

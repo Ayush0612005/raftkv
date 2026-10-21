@@ -12,3 +12,4 @@ target/
 # local node data from manual runs / benchmarks
 data/
 bench/work/
+chaos-logs.txt

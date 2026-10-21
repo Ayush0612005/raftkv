@@ -1,6 +1,7 @@
 package io.raftkv.raft;
 
 import io.raftkv.harness.SimCluster;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -17,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Phase 2 gate: logs identical on all nodes. Modelled on MIT 6.5840 lab 3B. */
+@Tag("fault")
 class ReplicationTest {
 
     @Test

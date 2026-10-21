@@ -6,6 +6,7 @@ import io.raftkv.harness.SimCluster;
 import io.raftkv.harness.SimKvEndpoint;
 import io.raftkv.kv.KvStateMachine;
 import io.raftkv.storage.FileStorage;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Phase 5 gate: log size bounded. Modelled on MIT 6.5840 lab 3D, plus a disk-level bound on the real WAL. */
+@Tag("fault")
 class SnapshotTest {
 
     private static final int THRESHOLD = 20;

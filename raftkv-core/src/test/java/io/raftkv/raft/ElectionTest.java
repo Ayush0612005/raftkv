@@ -1,6 +1,7 @@
 package io.raftkv.raft;
 
 import io.raftkv.harness.SimCluster;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
@@ -13,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Phase 1 gate: exactly one leader; re-elects on failure. Modelled on MIT 6.5840 lab 3A. */
+@Tag("fault")
 class ElectionTest {
 
     @Test

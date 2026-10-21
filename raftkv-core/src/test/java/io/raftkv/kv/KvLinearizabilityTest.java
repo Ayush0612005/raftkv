@@ -11,6 +11,7 @@ import io.raftkv.proto.KvCommand;
 import io.raftkv.proto.KvResult;
 import io.raftkv.proto.Op;
 import io.raftkv.raft.NotLeaderException;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * DELETE against a few hot keys while faults are injected; every operation's call and return time is recorded and
  * the whole history must pass the WGL linearizability checker. Afterwards all replicas must hold identical data.
  */
+@Tag("fault")
 class KvLinearizabilityTest {
 
     private static final int KEYS = 4;
