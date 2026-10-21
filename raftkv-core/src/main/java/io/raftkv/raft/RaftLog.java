@@ -121,6 +121,34 @@ final class RaftLog {
         return -1;
     }
 
+    /**
+     * Discards everything up to and including {@code index}, which a snapshot now covers. Entries after it stay.
+     * The caller guarantees {@code index} is in the log and {@code term} is its term.
+     */
+    void compactTo(long index, long term) {
+        if (index <= snapshotIndex) {
+            return;
+        }
+        if (index > lastIndex()) {
+            throw new IllegalArgumentException("compacting to " + index + " beyond last index " + lastIndex());
+        }
+        if (termAt(index) != term) {
+            throw new IllegalArgumentException("term mismatch compacting to " + index);
+        }
+        entries.subList(0, offset(index) + 1).clear();
+        entries.trimToSize();
+        snapshotIndex = index;
+        snapshotTerm = term;
+    }
+
+    /** Throws the whole log away and starts it again right after a snapshot (InstallSnapshot, recovery). */
+    void resetTo(long index, long term) {
+        entries.clear();
+        entries.trimToSize();
+        snapshotIndex = index;
+        snapshotTerm = term;
+    }
+
     private int offset(long index) {
         return (int) (index - snapshotIndex - 1);
     }

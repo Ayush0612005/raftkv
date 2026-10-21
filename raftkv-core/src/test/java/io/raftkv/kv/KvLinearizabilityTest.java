@@ -40,6 +40,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 class KvLinearizabilityTest {
 
     private static final int KEYS = 4;
+    /** Snapshot every 25 entries, so compaction and InstallSnapshot happen all the time during the gate runs. */
+    private static final int SNAPSHOT_EVERY = 25;
 
     @TempDir
     Path dataDir;
@@ -153,7 +155,7 @@ class KvLinearizabilityTest {
 
     @Test
     void concurrentClientsReliableNetwork() throws Exception {
-        try (SimCluster cluster = new SimCluster(3, null, KvStateMachine::new)) {
+        try (SimCluster cluster = new SimCluster(3, null, KvStateMachine::new, SNAPSHOT_EVERY)) {
             runAndCheck(cluster, 5, 3_000, () -> {
             });
         }
@@ -161,7 +163,7 @@ class KvLinearizabilityTest {
 
     @Test
     void concurrentClientsUnreliableNetwork() throws Exception {
-        try (SimCluster cluster = new SimCluster(5, null, KvStateMachine::new)) {
+        try (SimCluster cluster = new SimCluster(5, null, KvStateMachine::new, SNAPSHOT_EVERY)) {
             cluster.network().setReliable(false);
             runAndCheck(cluster, 5, 5_000, () -> {
             });
@@ -171,7 +173,7 @@ class KvLinearizabilityTest {
     /** The leader keeps getting cut off into a minority, where it can accept requests but never commit them. */
     @Test
     void leaderRepeatedlyPartitionedIntoMinority() throws Exception {
-        try (SimCluster cluster = new SimCluster(5, null, KvStateMachine::new)) {
+        try (SimCluster cluster = new SimCluster(5, null, KvStateMachine::new, SNAPSHOT_EVERY)) {
             runAndCheck(cluster, 5, 8_000, () -> {
                 while (true) {
                     int leader = -1;
@@ -201,7 +203,7 @@ class KvLinearizabilityTest {
 
     @Test
     void crashesAndRestarts() throws Exception {
-        try (SimCluster cluster = new SimCluster(5, null, KvStateMachine::new)) {
+        try (SimCluster cluster = new SimCluster(5, null, KvStateMachine::new, SNAPSHOT_EVERY)) {
             runAndCheck(cluster, 5, 8_000, () -> {
                 ThreadLocalRandom random = ThreadLocalRandom.current();
                 while (true) {
@@ -222,7 +224,7 @@ class KvLinearizabilityTest {
     /** Everything at once: lossy, reordering network, partitions and crashes, on real WALs. */
     @Test
     void everythingAtOnceOnRealWal() throws Exception {
-        try (SimCluster cluster = new SimCluster(5, dataDir, KvStateMachine::new)) {
+        try (SimCluster cluster = new SimCluster(5, dataDir, KvStateMachine::new, SNAPSHOT_EVERY)) {
             cluster.network().setReliable(false);
             runAndCheck(cluster, 5, 8_000, () -> {
                 ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -264,7 +266,7 @@ class KvLinearizabilityTest {
      */
     @Test
     void retriedCommandTakesEffectOnceEndToEnd() throws Exception {
-        try (SimCluster cluster = new SimCluster(3, null, KvStateMachine::new)) {
+        try (SimCluster cluster = new SimCluster(3, null, KvStateMachine::new, SNAPSHOT_EVERY)) {
             int leader = cluster.checkOneLeader();
             KvCommand aPut = KvCommand.newBuilder().setOp(Op.PUT).setKey("k").setValue("from-a")
                     .setClientId(111).setSeq(1).build();
@@ -279,6 +281,43 @@ class KvLinearizabilityTest {
             for (int i = 0; i < 3; i++) {
                 assertEquals("from-b", ((KvStateMachine) cluster.stateMachine(i)).peek("k"),
                         "node " + i + ": the duplicate overwrote a later write");
+            }
+        }
+    }
+
+    /**
+     * Exactly-once across compaction: the first copy of a command is folded into snapshots, every node restarts from
+     * its snapshot, and only then does the retry arrive. The dedup table must have travelled inside the snapshot.
+     */
+    @Test
+    void retryAfterRestartFromSnapshotTakesEffectOnce() throws Exception {
+        try (SimCluster cluster = new SimCluster(3, null, KvStateMachine::new, SNAPSHOT_EVERY)) {
+            KvCommand aPut = KvCommand.newBuilder().setOp(Op.PUT).setKey("k").setValue("from-a")
+                    .setClientId(111).setSeq(1).build();
+            KvCommand bPut = KvCommand.newBuilder().setOp(Op.PUT).setKey("k").setValue("from-b")
+                    .setClientId(222).setSeq(1).build();
+            int leader = cluster.checkOneLeader();
+            KvResult first = propose(cluster, leader, aPut);
+            propose(cluster, leader, bPut);
+            for (int i = 0; i < 3 * SNAPSHOT_EVERY; i++) {
+                propose(cluster, leader, KvCommand.newBuilder().setOp(Op.PUT).setKey("filler")
+                        .setValue(String.valueOf(i)).setClientId(333).setSeq(i + 1).build());
+            }
+            cluster.checkLogsIdentical();
+            for (int i = 0; i < 3; i++) {
+                assertTrue(cluster.node(i).status().snapshotIndex() > 2, "node " + i + " should have compacted");
+                cluster.crash(i);
+            }
+            for (int i = 0; i < 3; i++) {
+                cluster.restart(i);
+            }
+
+            KvResult retry = propose(cluster, cluster.checkOneLeader(), aPut);
+            assertEquals(first, retry, "a duplicate must get the original answer after a snapshot restore");
+            cluster.checkLogsIdentical();
+            for (int i = 0; i < 3; i++) {
+                assertEquals("from-b", ((KvStateMachine) cluster.stateMachine(i)).peek("k"),
+                        "node " + i + ": the duplicate overwrote a later write after restoring from a snapshot");
             }
         }
     }

@@ -28,6 +28,7 @@ class GrpcClusterTest {
 
     private final Map<Integer, String> cluster = new LinkedHashMap<>();
     private final RaftKvServer[] servers = new RaftKvServer[3];
+    private int snapshotThreshold = io.raftkv.raft.RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD;
 
     private void startCluster() throws IOException {
         for (int i = 0; i < 3; i++) {
@@ -39,7 +40,8 @@ class GrpcClusterTest {
     }
 
     private void startServer(int i) {
-        servers[i] = RaftKvServer.start(new RaftKvServer.Options(i + 1, cluster, dataDir.resolve("node-" + (i + 1)), true));
+        servers[i] = RaftKvServer.start(new RaftKvServer.Options(
+                i + 1, cluster, dataDir.resolve("node-" + (i + 1)), true, snapshotThreshold));
     }
 
     private static int freePort() throws IOException {
@@ -99,6 +101,34 @@ class GrpcClusterTest {
             assertEquals("java-25", servers[leader].stateMachine().peek("lang"));
             assertEquals(null, servers[leader].stateMachine().peek("key-0"));
             assertEquals("value-49", servers[leader].stateMachine().peek("key-49"));
+        }
+    }
+
+    /** InstallSnapshot over real gRPC: a follower that was down while the others compacted their logs. */
+    @Test
+    void restartedFollowerReceivesSnapshotOverGrpc() throws Exception {
+        snapshotThreshold = 20;
+        startCluster();
+        try (RaftKvClient client = RaftKvClient.connect(cluster)) {
+            client.put("first", "1");
+            int follower = (leaderIndex() + 1) % 3;
+            servers[follower].close();
+            servers[follower] = null;
+            for (int i = 0; i < 200; i++) {
+                client.put("k" + i, "v" + i);
+            }
+            int leader = leaderIndex();
+            assertTrue(servers[leader].status().snapshotIndex() > 100, "leader should have compacted its log");
+
+            startServer(follower);
+            long target = servers[leader].status().commitIndex();
+            for (int attempt = 0; attempt < 100 && servers[follower].status().lastApplied() < target; attempt++) {
+                Thread.sleep(50);
+            }
+            assertTrue(servers[follower].status().lastApplied() >= target, "follower did not catch up");
+            assertTrue(servers[follower].status().snapshotIndex() > 100, "catch-up should have come from a snapshot");
+            assertEquals("1", servers[follower].stateMachine().peek("first"));
+            assertEquals("v199", servers[follower].stateMachine().peek("k199"));
         }
     }
 

@@ -4,6 +4,8 @@ import io.grpc.ManagedChannel;
 import io.grpc.StatusRuntimeException;
 import io.raftkv.proto.AppendEntriesRequest;
 import io.raftkv.proto.AppendEntriesResponse;
+import io.raftkv.proto.InstallSnapshotRequest;
+import io.raftkv.proto.InstallSnapshotResponse;
 import io.raftkv.proto.RaftGrpc;
 import io.raftkv.proto.RequestVoteRequest;
 import io.raftkv.proto.RequestVoteResponse;
@@ -42,6 +44,15 @@ public final class GrpcTransport implements RaftTransport, AutoCloseable {
             return stub(target).appendEntries(request);
         } catch (StatusRuntimeException e) {
             throw new RpcException("AppendEntries to " + target + ": " + e.getStatus(), e);
+        }
+    }
+
+    @Override
+    public InstallSnapshotResponse installSnapshot(int target, InstallSnapshotRequest request) throws RpcException {
+        try {
+            return stub(target).installSnapshot(request);
+        } catch (StatusRuntimeException e) {
+            throw new RpcException("InstallSnapshot to " + target + ": " + e.getStatus(), e);
         }
     }
 

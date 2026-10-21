@@ -38,6 +38,8 @@ public final class KvGrpcService extends KvGrpc.KvImplBase {
                 .setLastLogIndex(s.lastLogIndex())
                 .setCommitIndex(s.commitIndex())
                 .setLastApplied(s.lastApplied())
+                .setSnapshotIndex(s.snapshotIndex())
+                .setLogEntries(s.logEntries())
                 .build());
         observer.onCompleted();
     }

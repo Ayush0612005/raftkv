@@ -62,6 +62,29 @@ class KvStateMachineTest {
     }
 
     @Test
+    void snapshotRestoresDataAndDedupTable() throws Exception {
+        apply(Op.PUT, "a", "1", 1, 1);
+        apply(Op.PUT, "b", "2", 2, 1);
+        KvResult deleted = apply(Op.DELETE, "a", "", 1, 2);
+        byte[] snapshot = sm.snapshot();
+
+        KvStateMachine other = new KvStateMachine();
+        other.apply(1, KvCommand.newBuilder().setOp(Op.PUT).setKey("junk").setValue("x").build().toByteArray());
+        other.restore(snapshot);
+        assertEquals(1, other.size(), "restore replaces the whole state");
+        assertEquals("2", other.peek("b"));
+        assertEquals(null, other.peek("a"));
+        assertEquals(2, other.sessionCount());
+
+        // a retry of client 1's delete after restore must still be recognised as a duplicate
+        KvCommand retry = KvCommand.newBuilder().setOp(Op.DELETE).setKey("a").setClientId(1).setSeq(2).build();
+        other.apply(1, KvCommand.newBuilder().setOp(Op.PUT).setKey("a").setValue("new").setClientId(3).setSeq(1)
+                .build().toByteArray());
+        assertEquals(deleted, KvResult.parseFrom(other.apply(2, retry.toByteArray())));
+        assertEquals("new", other.peek("a"), "the duplicate delete must not run again");
+    }
+
+    @Test
     void malformedCommandIsANoOp() {
         byte[] result = sm.apply(1, new byte[] {(byte) 0xFF, 0x01, 0x02});
         assertEquals(0, result.length);

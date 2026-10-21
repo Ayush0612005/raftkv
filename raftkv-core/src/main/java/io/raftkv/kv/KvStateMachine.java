@@ -3,6 +3,8 @@ package io.raftkv.kv;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.raftkv.proto.KvCommand;
 import io.raftkv.proto.KvResult;
+import io.raftkv.proto.KvSession;
+import io.raftkv.proto.KvSnapshot;
 import io.raftkv.raft.StateMachine;
 
 import java.util.HashMap;
@@ -57,6 +59,32 @@ public final class KvStateMachine implements StateMachine {
             case DELETE -> KvResult.newBuilder().setFound(data.remove(cmd.getKey()) != null).build();
             case UNRECOGNIZED -> KvResult.getDefaultInstance();
         };
+    }
+
+    @Override
+    public synchronized byte[] snapshot() {
+        KvSnapshot.Builder snapshot = KvSnapshot.newBuilder().putAllData(data);
+        sessions.forEach((clientId, session) -> snapshot.addSessions(KvSession.newBuilder()
+                .setClientId(clientId)
+                .setLastSeq(session.lastSeq())
+                .setLastResult(session.lastResult())));
+        return snapshot.build().toByteArray();
+    }
+
+    @Override
+    public synchronized void restore(byte[] bytes) {
+        KvSnapshot snapshot;
+        try {
+            snapshot = KvSnapshot.parseFrom(bytes);
+        } catch (InvalidProtocolBufferException e) {
+            throw new IllegalStateException("corrupt KV snapshot", e);
+        }
+        data.clear();
+        data.putAll(snapshot.getDataMap());
+        sessions.clear();
+        for (KvSession s : snapshot.getSessionsList()) {
+            sessions.put(s.getClientId(), new Session(s.getLastSeq(), s.getLastResult()));
+        }
     }
 
     public synchronized int size() {

@@ -2,6 +2,8 @@ package io.raftkv.harness;
 
 import io.raftkv.proto.AppendEntriesRequest;
 import io.raftkv.proto.AppendEntriesResponse;
+import io.raftkv.proto.InstallSnapshotRequest;
+import io.raftkv.proto.InstallSnapshotResponse;
 import io.raftkv.proto.RequestVoteRequest;
 import io.raftkv.proto.RequestVoteResponse;
 import io.raftkv.raft.RaftRpcHandler;
@@ -101,6 +103,12 @@ public final class SimNetwork {
             @Override
             public AppendEntriesResponse appendEntries(int target, AppendEntriesRequest request) throws RpcException {
                 return call(from, target, h -> h.handleAppendEntries(request));
+            }
+
+            @Override
+            public InstallSnapshotResponse installSnapshot(int target, InstallSnapshotRequest request)
+                    throws RpcException {
+                return call(from, target, h -> h.handleInstallSnapshot(request));
             }
         };
     }

@@ -13,12 +13,13 @@ import java.util.List;
 public final class MemoryStorage implements RaftStorage {
 
     private HardState hardState = HardState.INITIAL;
+    private Snapshot snapshot;
     private final List<LogEntry> durable = new ArrayList<>();
     private final List<Runnable> unsynced = new ArrayList<>();
 
     @Override
     public synchronized PersistentState load() {
-        return new PersistentState(hardState, List.copyOf(durable));
+        return new PersistentState(hardState, snapshot, List.copyOf(durable));
     }
 
     @Override
@@ -42,6 +43,19 @@ public final class MemoryStorage implements RaftStorage {
     public synchronized void sync() {
         unsynced.forEach(Runnable::run);
         unsynced.clear();
+    }
+
+    @Override
+    public synchronized void saveSnapshot(Snapshot snapshot, List<LogEntry> entriesAfter) {
+        unsynced.clear(); // superseded: entriesAfter is the complete log after the snapshot
+        this.snapshot = snapshot;
+        durable.clear();
+        durable.addAll(entriesAfter);
+    }
+
+    /** Number of log entries stored (durable), for tests that check the log stays bounded. */
+    public synchronized int storedEntries() {
+        return durable.size();
     }
 
     @Override

@@ -33,12 +33,16 @@ public final class RaftKvServer implements AutoCloseable {
     private static final Duration RPC_TIMEOUT = Duration.ofSeconds(1);
     private static final Duration COMMIT_TIMEOUT = Duration.ofSeconds(2);
 
-    public record Options(int id, Map<Integer, String> cluster, Path dataDir, boolean fsync) {
+    public record Options(int id, Map<Integer, String> cluster, Path dataDir, boolean fsync, int snapshotThreshold) {
         public Options {
             cluster = Map.copyOf(cluster);
             if (!cluster.containsKey(id)) {
                 throw new IllegalArgumentException("cluster " + cluster + " does not contain this node's id " + id);
             }
+        }
+
+        public Options(int id, Map<Integer, String> cluster, Path dataDir, boolean fsync) {
+            this(id, cluster, dataDir, fsync, RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD);
         }
     }
 
@@ -55,7 +59,9 @@ public final class RaftKvServer implements AutoCloseable {
         peers.remove(options.id());
         FileStorage storage = new FileStorage(options.dataDir(), options.fsync());
         this.transport = new GrpcTransport(peers, RPC_TIMEOUT);
-        this.node = new RaftNode(RaftConfig.defaults(options.id(), peers.keySet().stream().sorted().toList()),
+        RaftConfig config = RaftConfig.defaults(options.id(), peers.keySet().stream().sorted().toList())
+                .withSnapshotThreshold(options.snapshotThreshold());
+        this.node = new RaftNode(config,
                 transport, storage, stateMachine);
         this.server = Grpc.newServerBuilderForPort(port(options.cluster().get(options.id())),
                         InsecureServerCredentials.create())

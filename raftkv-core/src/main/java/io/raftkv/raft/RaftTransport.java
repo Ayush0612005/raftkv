@@ -2,6 +2,8 @@ package io.raftkv.raft;
 
 import io.raftkv.proto.AppendEntriesRequest;
 import io.raftkv.proto.AppendEntriesResponse;
+import io.raftkv.proto.InstallSnapshotRequest;
+import io.raftkv.proto.InstallSnapshotResponse;
 import io.raftkv.proto.RequestVoteRequest;
 import io.raftkv.proto.RequestVoteResponse;
 
@@ -15,4 +17,6 @@ public interface RaftTransport {
     RequestVoteResponse requestVote(int target, RequestVoteRequest request) throws RpcException;
 
     AppendEntriesResponse appendEntries(int target, AppendEntriesRequest request) throws RpcException;
+
+    InstallSnapshotResponse installSnapshot(int target, InstallSnapshotRequest request) throws RpcException;
 }

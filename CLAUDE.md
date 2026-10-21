@@ -12,10 +12,13 @@ Owner: Ayush (GitHub `Ayush0612005`), repo `Ayush0612005/raftkv` (public).
 - Phase 3 (persistence): done, gate passed. Report `docs/phase-3.md`. WAL = `storage/FileStorage`.
 - Phase 4 (KV + client API): done, gate passed. Report `docs/phase-4.md`. Packages `kv`, `transport`, `server`,
   `client`, `cli`; shaded jar `raftkv-core/target/raftkv.jar`. Linearizability checker `harness/Linearizability`.
-- **Next: Phase 5 (snapshots). Do not start it until the owner says so.** Planned: `StateMachine.snapshot()/restore()`
-  (KV map + dedup sessions), `RaftLog.compact`, snapshot file (atomic write) + WAL rewrite in `FileStorage`,
-  InstallSnapshot RPC (leader sends when `nextIndex <= snapshotIndex`), applier restores snapshots, threshold-based
-  compaction; gate test: log size stays bounded under a long write workload and lagging/restarted nodes recover.
+- Phase 5 (snapshots): done, gate passed. Report `docs/phase-5.md`. `RaftConfig.snapshotThreshold` /
+  `--snapshot-threshold` (default 10,000), `snapshot.bin` + WAL rewrite in `FileStorage`, InstallSnapshot RPC.
+- **Next: Phase 6 (fault tests in CI + benchmarks). Do not start it until the owner says so.** Planned: separate CI
+  job for the long fault-injection suite; JMH micro-benchmarks (WAL append+fsync, KV apply, snapshot serialize) in a
+  `raftkv-bench` module; load generator (closed-loop clients, throughput + p50/p99 latency) against real 3-node and
+  5-node gRPC clusters; Dockerfile + docker-compose for 3/5 nodes (Docker Desktop must be running; it was not on
+  2026-10-20); results table + SVG graphs (generated in Java, no Python on this laptop) in the README.
 
 ## Plan (one commit + `docs/phase-N.md` report per phase, pushed to `main`)
 

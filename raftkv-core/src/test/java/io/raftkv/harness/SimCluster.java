@@ -11,17 +11,24 @@ import io.raftkv.raft.RaftStorage;
 import io.raftkv.raft.StateMachine;
 import io.raftkv.storage.FileStorage;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.function.Supplier;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.fail;
@@ -34,6 +41,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  *   <li>State Machine Safety: if two nodes apply different commands at the same index, the test fails;</li>
  *   <li>each node must apply indexes in increasing order.</li>
  * </ul>
+ * With snapshots on, each node's snapshot also carries the harness's record of what that node applied (like the
+ * MIT 3D tester), so a node restored from a snapshot, its own or one installed from the leader, is still checked
+ * against everyone else.
  */
 public final class SimCluster implements AutoCloseable {
 
@@ -50,26 +60,36 @@ public final class SimCluster implements AutoCloseable {
     private final long[] lastAppliedIndex;
     private final Map<Long, Integer> leaderOfTerm = new ConcurrentHashMap<>();
     private final List<String> violations = new ArrayList<>();
-    /** Creates each node's application state machine (again on every restart, since the log is re-applied). */
+    /** Creates each node's application state machine (again on every restart). */
     private final Supplier<StateMachine> stateMachineFactory;
     private final StateMachine[] stateMachines;
+    /** 0: snapshots off. */
+    private final int snapshotThreshold;
+    private final AtomicInteger snapshotsInstalled = new AtomicInteger();
+    private final AtomicInteger compactions = new AtomicInteger();
 
     public SimCluster(int n) {
         this(n, null);
     }
 
     public SimCluster(int n, Path dataDir) {
-        this(n, dataDir, () -> (index, command) -> command);
+        this(n, dataDir, EchoStateMachine::new, 0);
+    }
+
+    public SimCluster(int n, Path dataDir, Supplier<StateMachine> stateMachineFactory) {
+        this(n, dataDir, stateMachineFactory, 0);
     }
 
     /**
-     * @param dataDir null for in-memory storage, otherwise each node keeps a real {@link FileStorage} WAL there
-     * @param stateMachineFactory the application under test (the default echoes the command back)
+     * @param dataDir             null for in-memory storage, otherwise each node keeps a real {@link FileStorage} there
+     * @param stateMachineFactory the application under test ({@link EchoStateMachine} echoes the command back)
+     * @param snapshotThreshold   entries between snapshots; 0 turns snapshots off
      */
-    public SimCluster(int n, Path dataDir, Supplier<StateMachine> stateMachineFactory) {
+    public SimCluster(int n, Path dataDir, Supplier<StateMachine> stateMachineFactory, int snapshotThreshold) {
         this.n = n;
         this.dataDir = dataDir;
         this.stateMachineFactory = stateMachineFactory;
+        this.snapshotThreshold = snapshotThreshold;
         this.stateMachines = new StateMachine[n];
         this.nodes = new RaftNode[n];
         this.storages = new RaftStorage[n];
@@ -95,15 +115,38 @@ public final class SimCluster implements AutoCloseable {
                     violation("term " + term + " has two leaders: " + previous + " and " + nodeId);
                 }
             }
+
+            @Override
+            public void onSnapshotInstalled(int nodeId, long lastIncludedIndex) {
+                snapshotsInstalled.incrementAndGet();
+            }
+
+            @Override
+            public void onLogCompacted(int nodeId, long lastIncludedIndex) {
+                compactions.incrementAndGet();
+            }
         };
         StateMachine application = stateMachineFactory.get();
         stateMachines[i] = application;
-        StateMachine stateMachine = (index, command) -> {
-            onApply(i, index, new String(command, StandardCharsets.ISO_8859_1));
-            return application.apply(index, command);
+        StateMachine recording = new StateMachine() {
+            @Override
+            public byte[] apply(long index, byte[] command) {
+                onApply(i, index, new String(command, StandardCharsets.ISO_8859_1));
+                return application.apply(index, command);
+            }
+
+            @Override
+            public byte[] snapshot() {
+                return encodeSnapshot(i, application.snapshot());
+            }
+
+            @Override
+            public void restore(byte[] snapshot) {
+                application.restore(decodeSnapshot(i, snapshot));
+            }
         };
-        RaftNode node = new RaftNode(RaftConfig.defaults(i, peers), network.transportFor(i), storages[i],
-                stateMachine, observer);
+        RaftConfig config = RaftConfig.defaults(i, peers).withSnapshotThreshold(snapshotThreshold);
+        RaftNode node = new RaftNode(config, network.transportFor(i), storages[i], recording, observer);
         nodes[i] = node;
         network.register(i, node);
         node.start();
@@ -122,6 +165,74 @@ public final class SimCluster implements AutoCloseable {
             }
         }
         applied.get(server).put(index, command);
+    }
+
+    /** Harness snapshot = [last applied index, the node's applied commands, the application's own snapshot]. */
+    private synchronized byte[] encodeSnapshot(int server, byte[] applicationSnapshot) {
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(bytes);
+            out.writeLong(lastAppliedIndex[server]);
+            Map<Long, String> log = new TreeMap<>(applied.get(server));
+            out.writeInt(log.size());
+            for (var e : log.entrySet()) {
+                byte[] command = e.getValue().getBytes(StandardCharsets.ISO_8859_1);
+                out.writeLong(e.getKey());
+                out.writeInt(command.length);
+                out.write(command);
+            }
+            out.writeInt(applicationSnapshot.length);
+            out.write(applicationSnapshot);
+            return bytes.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** Replaces what {@code server} is recorded to have applied with the snapshot's record; returns the app part. */
+    private synchronized byte[] decodeSnapshot(int server, byte[] snapshot) {
+        try {
+            DataInputStream in = new DataInputStream(new ByteArrayInputStream(snapshot));
+            long lastIndex = in.readLong();
+            int count = in.readInt();
+            Map<Long, String> log = new HashMap<>();
+            for (int k = 0; k < count; k++) {
+                long index = in.readLong();
+                byte[] command = in.readNBytes(in.readInt());
+                log.put(index, new String(command, StandardCharsets.ISO_8859_1));
+            }
+            byte[] application = in.readNBytes(in.readInt());
+            // what the snapshot says was applied must agree with every other node
+            for (var e : log.entrySet()) {
+                for (int j = 0; j < n; j++) {
+                    String other = applied.get(j).get(e.getKey());
+                    if (j != server && other != null && !other.equals(e.getValue())) {
+                        violation("snapshot on server " + server + " has " + e.getValue() + " at " + e.getKey()
+                                + " but server " + j + " applied " + other);
+                    }
+                }
+            }
+            applied.get(server).clear();
+            applied.get(server).putAll(log);
+            lastAppliedIndex[server] = lastIndex;
+            return application;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** InstallSnapshot RPCs that a follower accepted, over the cluster's lifetime. */
+    public int snapshotsInstalled() {
+        return snapshotsInstalled.get();
+    }
+
+    /** Times a node compacted its own log. */
+    public int compactions() {
+        return compactions.get();
+    }
+
+    public RaftStorage storage(int i) {
+        return storages[i];
     }
 
     private void violation(String message) {

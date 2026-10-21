@@ -4,6 +4,8 @@ import com.google.protobuf.ByteString;
 import io.raftkv.proto.AppendEntriesRequest;
 import io.raftkv.proto.AppendEntriesResponse;
 import io.raftkv.proto.EntryType;
+import io.raftkv.proto.InstallSnapshotRequest;
+import io.raftkv.proto.InstallSnapshotResponse;
 import io.raftkv.proto.LogEntry;
 import io.raftkv.proto.RequestVoteRequest;
 import io.raftkv.proto.RequestVoteResponse;
@@ -61,6 +63,10 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
     private long lastApplied;
     /** Highest log index known to be on stable storage. A leader counts itself toward a commit only up to here. */
     private long durableIndex;
+    /** The latest snapshot (taken here or installed from a leader); sent to followers that are too far behind. */
+    private Snapshot snapshot;
+    /** A snapshot installed from the leader that the applier has not loaded into the state machine yet. */
+    private Snapshot pendingRestore;
     /** Log writes were made since the last sync. */
     private boolean dirty;
     private long electionDeadlineNanos;
@@ -89,6 +95,14 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
         RaftStorage.PersistentState state = storage.load();
         this.currentTerm = state.hardState().term();
         this.votedFor = state.hardState().votedFor();
+        if (state.snapshot() != null) {
+            Snapshot s = state.snapshot();
+            log.resetTo(s.lastIncludedIndex(), s.lastIncludedTerm());
+            stateMachine.restore(s.data());
+            this.snapshot = s;
+            this.commitIndex = s.lastIncludedIndex(); // a snapshot only ever contains committed entries
+            this.lastApplied = s.lastIncludedIndex();
+        }
         for (LogEntry entry : state.entries()) {
             log.append(entry);
         }
@@ -121,7 +135,8 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
     public NodeStatus status() {
         lock.lock();
         try {
-            return new NodeStatus(id, role, currentTerm, leaderId, log.lastIndex(), commitIndex, lastApplied);
+            return new NodeStatus(id, role, currentTerm, leaderId, log.lastIndex(), commitIndex, lastApplied,
+                    log.snapshotIndex(), log.size());
         } finally {
             lock.unlock();
         }
@@ -340,6 +355,13 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
             while (isLeaderOf(term)) {
                 syncLeaderLog();
                 long next = nextIndex.get(peer);
+                if (next <= log.snapshotIndex()) {
+                    // the entries this peer needs were compacted away: send the snapshot instead (§7)
+                    if (!sendSnapshot(peer, term)) {
+                        replicatorWakeup.awaitNanos(heartbeatNanos);
+                    }
+                    continue;
+                }
                 long prevIndex = next - 1;
                 AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
                         .setTerm(term)
@@ -371,6 +393,47 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
         } finally {
             lock.unlock();
         }
+    }
+
+    /**
+     * Sends the current snapshot to {@code peer} (lock held on entry and exit, released during the RPC). Returns
+     * false if the RPC failed and the caller should wait before retrying.
+     */
+    private boolean sendSnapshot(int peer, long term) {
+        Snapshot s = snapshot;
+        InstallSnapshotRequest request = InstallSnapshotRequest.newBuilder()
+                .setTerm(term)
+                .setLeaderId(id)
+                .setLastIncludedIndex(s.lastIncludedIndex())
+                .setLastIncludedTerm(s.lastIncludedTerm())
+                .setData(ByteString.copyFrom(s.data()))
+                .build();
+        InstallSnapshotResponse response = null;
+        lock.unlock();
+        try {
+            response = transport.installSnapshot(peer, request);
+        } catch (RpcException e) {
+            // retry at the next heartbeat
+        } finally {
+            lock.lock();
+        }
+        if (response == null) {
+            return false;
+        }
+        if (response.getTerm() > currentTerm) {
+            becomeFollower(response.getTerm());
+            return true;
+        }
+        if (isLeaderOf(term)) {
+            // the peer now holds everything up to the snapshot (or already had it committed)
+            long match = s.lastIncludedIndex();
+            if (match > matchIndex.get(peer)) {
+                matchIndex.put(peer, match);
+                advanceCommitIndex();
+            }
+            nextIndex.put(peer, Math.max(nextIndex.get(peer), match + 1));
+        }
+        return true;
     }
 
     private void handleAppendEntriesResponse(int peer, long term, AppendEntriesRequest request,
@@ -474,20 +537,29 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
 
             // Log matching (§5.3): our log must contain prevLogIndex with prevLogTerm.
             long prevIndex = request.getPrevLogIndex();
-            if (prevIndex > log.lastIndex()) {
-                return response.setSuccess(false).setConflictTerm(0).setConflictIndex(log.lastIndex() + 1).build();
-            }
-            long localPrevTerm = log.termAt(prevIndex);
-            if (localPrevTerm != request.getPrevLogTerm()) {
-                return response.setSuccess(false)
-                        .setConflictTerm(localPrevTerm)
-                        .setConflictIndex(log.firstIndexOfTermRun(prevIndex))
-                        .build();
+            List<LogEntry> entries = request.getEntriesList();
+            if (prevIndex < log.snapshotIndex()) {
+                // Our snapshot covers prevLogIndex. Everything in it is committed, so it matches any current
+                // leader's log (Leader Completeness): skip the entries it covers and match at the snapshot point.
+                int covered = (int) Math.min(entries.size(), log.snapshotIndex() - prevIndex);
+                entries = entries.subList(covered, entries.size());
+            } else {
+                if (prevIndex > log.lastIndex()) {
+                    return response.setSuccess(false).setConflictTerm(0).setConflictIndex(log.lastIndex() + 1)
+                            .build();
+                }
+                long localPrevTerm = log.termAt(prevIndex);
+                if (localPrevTerm != request.getPrevLogTerm()) {
+                    return response.setSuccess(false)
+                            .setConflictTerm(localPrevTerm)
+                            .setConflictIndex(log.firstIndexOfTermRun(prevIndex))
+                            .build();
+                }
             }
 
             // Append new entries; delete a conflicting suffix only where terms differ. Entries we already have are
             // skipped, so a delayed, older AppendEntries can never truncate entries a newer one appended.
-            for (LogEntry entry : request.getEntriesList()) {
+            for (LogEntry entry : entries) {
                 long index = entry.getIndex();
                 if (index <= log.lastIndex()) {
                     if (log.termAt(index) == entry.getTerm()) {
@@ -520,22 +592,89 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
         }
     }
 
+    /**
+     * §7 / Figure 13: replace (a prefix of) our log with the leader's snapshot. If our log has the entry at the
+     * snapshot's last index with the same term, the entries after it are still valid and kept; otherwise the whole
+     * log is discarded. The state machine is reset by the applier thread.
+     */
+    @Override
+    public InstallSnapshotResponse handleInstallSnapshot(InstallSnapshotRequest request) {
+        lock.lock();
+        try {
+            InstallSnapshotResponse.Builder response = InstallSnapshotResponse.newBuilder();
+            if (closed || request.getTerm() < currentTerm) {
+                return response.setTerm(currentTerm).build();
+            }
+            becomeFollower(request.getTerm());
+            leaderId = request.getLeaderId();
+            resetElectionTimer();
+            response.setTerm(currentTerm);
+
+            long index = request.getLastIncludedIndex();
+            long term = request.getLastIncludedTerm();
+            if (index <= commitIndex) {
+                return response.build(); // we already have all of it, committed; nothing to do (stale or duplicate)
+            }
+            Snapshot s = new Snapshot(index, term, request.getData().toByteArray());
+            boolean keepSuffix = log.termAt(index) == term;
+            List<LogEntry> after = keepSuffix
+                    ? log.slice(index + 1, log.lastIndex(), Integer.MAX_VALUE, Long.MAX_VALUE)
+                    : List.of();
+            storage.saveSnapshot(s, after);
+            if (keepSuffix) {
+                log.compactTo(index, term);
+            } else {
+                log.resetTo(index, term);
+            }
+            snapshot = s;
+            markSynced();
+            commitIndex = index;
+            pendingRestore = s;
+            applierWakeup.signal();
+            observer.onSnapshotInstalled(id, index);
+            return response.build();
+        } finally {
+            lock.unlock();
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ apply
 
     private void runApplier() {
         while (true) {
             List<LogEntry> batch;
+            Snapshot restore;
+            long appliedBefore;
             lock.lock();
             try {
-                while (!closed && lastApplied >= commitIndex) {
+                while (!closed && lastApplied >= commitIndex && pendingRestore == null) {
                     applierWakeup.awaitUninterruptibly();
                 }
                 if (closed) {
                     return;
                 }
-                batch = log.slice(lastApplied + 1, commitIndex, MAX_ENTRIES_PER_APPLY, Long.MAX_VALUE);
+                restore = pendingRestore;
+                pendingRestore = null;
+                appliedBefore = lastApplied;
+                batch = restore != null
+                        ? List.of()
+                        : log.slice(lastApplied + 1, commitIndex, MAX_ENTRIES_PER_APPLY, Long.MAX_VALUE);
             } finally {
                 lock.unlock();
+            }
+
+            if (restore != null) {
+                // a snapshot from the leader replaces the state machine (never move backwards)
+                if (restore.lastIncludedIndex() > appliedBefore) {
+                    stateMachine.restore(restore.data());
+                }
+                lock.lock();
+                try {
+                    lastApplied = Math.max(lastApplied, restore.lastIncludedIndex());
+                } finally {
+                    lock.unlock();
+                }
+                continue;
             }
 
             // The state machine runs outside the lock: only this thread touches it, in log order.
@@ -566,6 +705,45 @@ public final class RaftNode implements RaftRpcHandler, AutoCloseable {
                 lock.unlock();
             }
             completions.forEach(Runnable::run); // outside the lock: callbacks may call back into the node
+            if (!batch.isEmpty()) {
+                maybeSnapshot(batch.getLast().getIndex());
+            }
+        }
+    }
+
+    /**
+     * Log compaction (§7): once {@code snapshotThreshold} entries have been applied since the last snapshot,
+     * serialize the state machine and drop that prefix of the log. Runs on the applier thread right after
+     * {@code appliedIndex} was applied, so the state machine's state is exactly the state at that index.
+     */
+    private void maybeSnapshot(long appliedIndex) {
+        int threshold = config.snapshotThreshold();
+        long since;
+        lock.lock();
+        try {
+            since = appliedIndex - log.snapshotIndex();
+        } finally {
+            lock.unlock();
+        }
+        if (threshold == 0 || since < threshold) {
+            return;
+        }
+        byte[] data = stateMachine.snapshot(); // outside the lock: may take a while for a big state
+        lock.lock();
+        try {
+            if (closed || appliedIndex <= log.snapshotIndex() || appliedIndex > log.lastIndex()) {
+                return; // a newer snapshot was installed meanwhile
+            }
+            long term = log.termAt(appliedIndex);
+            Snapshot s = new Snapshot(appliedIndex, term, data);
+            storage.saveSnapshot(s, log.slice(appliedIndex + 1, log.lastIndex(), Integer.MAX_VALUE, Long.MAX_VALUE));
+            log.compactTo(appliedIndex, term);
+            snapshot = s;
+            markSynced(); // saveSnapshot made the whole remaining log durable
+            advanceCommitIndex();
+            observer.onLogCompacted(id, appliedIndex);
+        } finally {
+            lock.unlock();
         }
     }
 

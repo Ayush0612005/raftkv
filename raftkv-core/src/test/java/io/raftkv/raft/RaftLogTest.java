@@ -59,6 +59,52 @@ class RaftLogTest {
     }
 
     @Test
+    void compactionKeepsTheSuffixAndTheBoundaryTerm() {
+        RaftLog log = logWithTerms(1, 1, 2, 2, 3);
+        log.compactTo(3, 2);
+        assertEquals(3, log.snapshotIndex());
+        assertEquals(2, log.snapshotTerm());
+        assertEquals(2, log.size());
+        assertEquals(5, log.lastIndex());
+        assertEquals(2, log.termAt(3), "the snapshot point keeps its term for log matching");
+        assertEquals(-1, log.termAt(2), "compacted entries are gone");
+        assertEquals(4, log.get(4).getIndex());
+        assertThrows(IndexOutOfBoundsException.class, () -> log.slice(3, 5, 10, Long.MAX_VALUE));
+        log.compactTo(2, 1); // older than the current snapshot: no-op
+        assertEquals(3, log.snapshotIndex());
+        log.append(entry(6, 3));
+        assertEquals(6, log.lastIndex());
+    }
+
+    @Test
+    void compactionToTheLastEntryLeavesAnEmptyLog() {
+        RaftLog log = logWithTerms(1, 2);
+        log.compactTo(2, 2);
+        assertEquals(0, log.size());
+        assertEquals(2, log.lastIndex());
+        assertEquals(2, log.lastTerm());
+    }
+
+    @Test
+    void resetDiscardsEverything() {
+        RaftLog log = logWithTerms(1, 1, 1);
+        log.resetTo(10, 4);
+        assertEquals(0, log.size());
+        assertEquals(10, log.lastIndex());
+        assertEquals(4, log.lastTerm());
+        assertThrows(IllegalArgumentException.class, () -> log.append(entry(3, 4)));
+        log.append(entry(11, 4));
+        assertEquals(11, log.lastIndex());
+    }
+
+    @Test
+    void compactionRejectsWrongTermOrIndex() {
+        RaftLog log = logWithTerms(1, 2);
+        assertThrows(IllegalArgumentException.class, () -> log.compactTo(2, 1));
+        assertThrows(IllegalArgumentException.class, () -> log.compactTo(5, 2));
+    }
+
+    @Test
     void termRunLookups() {
         RaftLog log = logWithTerms(1, 1, 4, 4, 4, 5);
         assertEquals(3, log.firstIndexOfTermRun(5));

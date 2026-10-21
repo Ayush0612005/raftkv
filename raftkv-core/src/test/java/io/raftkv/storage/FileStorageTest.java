@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString;
 import io.raftkv.proto.LogEntry;
 import io.raftkv.raft.HardState;
 import io.raftkv.raft.RaftStorage.PersistentState;
+import io.raftkv.raft.Snapshot;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -130,6 +131,88 @@ class FileStorageTest {
         try (FileStorage storage = new FileStorage(dir)) {
             assertEquals(entries(1, 2, 1), storage.load().entries(), "checksum must reject the damaged record");
         }
+    }
+
+    // ------------------------------------------------------------------------------------------ snapshots
+
+    private static Snapshot snapshot(long index, long term, String data) {
+        return new Snapshot(index, term, data.getBytes());
+    }
+
+    @Test
+    void snapshotReplacesTheLogPrefixAndShrinksTheWal() {
+        long before;
+        try (FileStorage storage = new FileStorage(dir)) {
+            storage.saveHardState(new HardState(5, 2));
+            storage.append(entries(1, 200, 5));
+            storage.sync();
+            before = storage.sizeBytes();
+            storage.saveSnapshot(snapshot(190, 5, "state@190"), entries(191, 200, 5));
+            assertTrue(storage.sizeBytes() < before / 5, "WAL should shrink: " + storage.sizeBytes() + " vs " + before);
+            storage.append(entries(201, 205, 5));
+            storage.sync();
+        }
+        try (FileStorage storage = new FileStorage(dir)) {
+            PersistentState state = storage.load();
+            assertEquals(new HardState(5, 2), state.hardState(), "hard state survives the WAL rewrite");
+            assertEquals(190, state.snapshot().lastIncludedIndex());
+            assertEquals(5, state.snapshot().lastIncludedTerm());
+            assertEquals("state@190", new String(state.snapshot().data()));
+            assertEquals(entries(191, 205, 5), state.entries());
+        }
+    }
+
+    @Test
+    void snapshotBeyondTheLogLeavesItEmpty() {
+        try (FileStorage storage = new FileStorage(dir)) {
+            storage.append(entries(1, 5, 1));
+            storage.sync();
+            storage.saveSnapshot(snapshot(50, 3, "from leader"), List.of()); // InstallSnapshot
+        }
+        try (FileStorage storage = new FileStorage(dir)) {
+            PersistentState state = storage.load();
+            assertEquals(50, state.snapshot().lastIncludedIndex());
+            assertTrue(state.entries().isEmpty());
+        }
+    }
+
+    /** Crash after the snapshot file was renamed into place but before the WAL was rewritten. */
+    @Test
+    void crashBetweenSnapshotAndWalRewriteKeepsMatchingSuffix() throws IOException {
+        try (FileStorage storage = new FileStorage(dir)) {
+            storage.append(entries(1, 10, 2));
+            storage.sync();
+        }
+        FileStorage.writeSnapshotFile(dir, snapshot(6, 2, "s"), true); // step 1 only
+        try (FileStorage storage = new FileStorage(dir)) {
+            assertEquals(6, storage.load().snapshot().lastIncludedIndex());
+            assertEquals(entries(7, 10, 2), storage.load().entries(), "entries the snapshot covers are dropped");
+        }
+    }
+
+    @Test
+    void crashBetweenSnapshotAndWalRewriteDropsConflictingSuffix() throws IOException {
+        try (FileStorage storage = new FileStorage(dir)) {
+            storage.append(entries(1, 10, 2));
+            storage.sync();
+        }
+        // a leader's snapshot whose term at index 6 differs from ours: our entries after it conflict
+        FileStorage.writeSnapshotFile(dir, snapshot(6, 3, "s"), true);
+        try (FileStorage storage = new FileStorage(dir)) {
+            assertTrue(storage.load().entries().isEmpty());
+        }
+    }
+
+    @Test
+    void corruptSnapshotIsRefused() throws IOException {
+        try (FileStorage storage = new FileStorage(dir)) {
+            storage.saveSnapshot(snapshot(3, 1, "important state"), List.of());
+        }
+        Path file = dir.resolve(FileStorage.SNAPSHOT_FILE);
+        byte[] bytes = Files.readAllBytes(file);
+        bytes[bytes.length - 1] ^= 0x01;
+        Files.write(file, bytes);
+        org.junit.jupiter.api.Assertions.assertThrows(java.io.UncheckedIOException.class, () -> new FileStorage(dir));
     }
 
     @Test

@@ -3,6 +3,7 @@ package io.raftkv.cli;
 import io.raftkv.client.GrpcKvEndpoint;
 import io.raftkv.client.RaftKvClient;
 import io.raftkv.proto.StatusResponse;
+import io.raftkv.raft.RaftConfig;
 import io.raftkv.raft.RpcException;
 import io.raftkv.server.RaftKvServer;
 import picocli.CommandLine;
@@ -60,10 +61,14 @@ public final class Main {
         @Option(names = "--no-fsync", description = "Skip fsync (benchmarks only: unsafe on power loss).")
         boolean noFsync;
 
+        @Option(names = "--snapshot-threshold", defaultValue = "" + RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD,
+                description = "Snapshot after this many applied entries (0 = never). Default: ${DEFAULT-VALUE}.")
+        int snapshotThreshold;
+
         @Override
         public Integer call() throws Exception {
             RaftKvServer server = RaftKvServer.start(
-                    new RaftKvServer.Options(id, ClusterSpec.parse(cluster), dataDir, !noFsync));
+                    new RaftKvServer.Options(id, ClusterSpec.parse(cluster), dataDir, !noFsync, snapshotThreshold));
             Runtime.getRuntime().addShutdownHook(new Thread(server::close));
             System.out.println("node " + id + " serving on " + ClusterSpec.parse(cluster).get(id));
             server.awaitTermination();
@@ -140,15 +145,15 @@ public final class Main {
         @Override
         public Integer call() {
             Map<Integer, String> nodes = cluster.resolve();
-            System.out.printf("%-4s %-22s %-10s %6s %7s %9s %8s %8s%n",
-                    "ID", "ADDRESS", "ROLE", "TERM", "LEADER", "LAST_LOG", "COMMIT", "APPLIED");
+            System.out.printf("%-4s %-22s %-10s %6s %7s %9s %8s %8s %9s %8s%n",
+                    "ID", "ADDRESS", "ROLE", "TERM", "LEADER", "LAST_LOG", "COMMIT", "APPLIED", "SNAPSHOT", "LOG_SIZE");
             try (GrpcKvEndpoint endpoint = new GrpcKvEndpoint(nodes)) {
                 for (var node : nodes.entrySet()) {
                     try {
                         StatusResponse s = endpoint.status(node.getKey());
-                        System.out.printf("%-4d %-22s %-10s %6d %7d %9d %8d %8d%n", s.getId(), node.getValue(),
+                        System.out.printf("%-4d %-22s %-10s %6d %7d %9d %8d %8d %9d %8d%n", s.getId(), node.getValue(),
                                 s.getRole(), s.getTerm(), s.getLeaderId(), s.getLastLogIndex(), s.getCommitIndex(),
-                                s.getLastApplied());
+                                s.getLastApplied(), s.getSnapshotIndex(), s.getLogEntries());
                     } catch (RpcException e) {
                         System.out.printf("%-4d %-22s %-10s%n", node.getKey(), node.getValue(), "DOWN");
                     }
